@@ -29,6 +29,10 @@ class RoadBookmarksDB():
 				del bookmarks[path]
 				change = True
 
+			if os.path.exists(path) and not bookmarks[path]:
+				del bookmarks[path]
+				change = True
+
 		if change:
 			self._write(bookmarks)
 
@@ -40,11 +44,21 @@ class RoadBookmarksDB():
 			return
 
 		# Read view bookmarks
-		view_bookmarks = [region.a for region in view.get_regions("bookmarks")]
+		regions = view.get_regions("bookmarks")
+		view_enriched_bookmarks = []
+		for region in regions:
+			pos = region.a
+			row, col = view.rowcol(pos)
+			view_enriched_bookmarks.append({
+	        "pos": pos,
+	        "row": row,
+	        "col": col
+	    })
+
 		# Load disk bookmarks
 		bookmarks = self.load()
 		# Assign file bookmarks
-		bookmarks[file_name] = view_bookmarks
+		bookmarks[file_name] = view_enriched_bookmarks
 		# Write file bookmarks
 		self._write(bookmarks)
 
@@ -69,22 +83,22 @@ class RoadBookmarksDB():
 			return
 
 		file_bookmarks = bookmarks[file_name]
-		regions = [sublime.Region(pos, pos) for pos in file_bookmarks]
+		regions = [sublime.Region(b["pos"], b["pos"]) for b in file_bookmarks]
 		view.add_regions("bookmarks", regions, "bookmark", "bookmark", sublime.HIDDEN)
 
 	def has_bookmarks_change(self, view):
 		file_name = view.file_name()	
 		if not file_name:
-			return
+			return False
 
-		bookmarks = self.load()
-		if file_name not in bookmarks:
-			return
+		bookmarks = self.load().get(file_name)
+		if not bookmarks:
+			return False
 
-		file_bookmarks = bookmarks[file_name]
-		view_bookmarks = [region.a for region in view.get_regions("bookmarks")]
+		saved_pos = [b["pos"] for b in bookmarks]
+		view_pos = [r.a for r in view.get_regions("bookmarks")]
 
-		return file_bookmarks != view_bookmarks
+		return saved_pos != view_pos
 
 road_bookmarks_db = RoadBookmarksDB()
 
@@ -125,54 +139,78 @@ class RoadBookmarksWatcher():
 road_bookmarks_watcher = RoadBookmarksWatcher()
 
 class RoadBookmarksPanelCommand(sublime_plugin.WindowCommand):
-	bookmark_locations = []
-	debugger = True
+    bookmark_locations = []
+    debugger = True
 
-	def run(self):
-		items = []
-		self.bookmark_locations = []
+    def run(self):
+        items = []
+        self.bookmark_locations = []
 
-		all_files = list(filter(None, map(lambda f : f.file_name(), sublime.active_window().views())))
-		self.debug("all_files", all_files)
+        bookmarks = road_bookmarks_db.load()
+        for file_path, entries in bookmarks.items():
+            if not os.path.exists(file_path):
+                continue
 
-		common_prefix = os.path.commonprefix(all_files)
-		self.debug("common_prefix", common_prefix)
+            file_name = os.path.basename(file_path)
 
-		for view in sublime.active_window().views():
-			prefix = ""
-			if view.name():
-				prefix=view.name()+":"
-			elif view.file_name():
-				prefix=view.name()+":"
-				if prefix.startswith(common_prefix):
-					prefix = prefix[len(common_prefix)]
+            view = self.window.find_open_file(file_path)
 
-			for region in view.get_regions("bookmarks"):
-				row,_=view.rowcol(region.a)
-				line=re.sub('/\\s+', ' ', view.substr(view.line(region))).strip()
-				items.append([prefix+str(row+1), line])
-				self.bookmark_locations.append((view, region))
+            for entry in entries:
+                pos = entry.get("pos")
+                row = entry.get("row", 0)
+                col = entry.get("col", 0)
 
-			if len(items) > 0:
-				sublime.active_window().show_quick_panel(items, self.go_there, sublime.MONOSPACE_FONT)
-			else:
-				sublime.active_window().show_quick_panel(["Empty bookmarks"], None, sublime.MONOSPACE_FONT)
+                # Safe fallback for line content preview
+                line_content = "(loading...)"
+                if view and not view.is_loading():
+                    try:
+                        line_content = view.substr(view.line(pos)).strip()
+                    except Exception:
+                        pass
 
-	def go_there(self, i):
-		if i < 0 or i >= len(self.bookmark_locations):
-			return
+                label = f"{file_name}:{row + 1}"
+                items.append([label, line_content])
+                self.bookmark_locations.append((file_path, pos))
 
-		view, region = self.bookmark_locations[i]
-		sublime.active_window().focus_view(view)
-		view.show_at_center(region)
-		view.sel().clear()
-		view.sel().add(region)
+        if items:
+            self.window.show_quick_panel(items, self.go_there, sublime.MONOSPACE_FONT)
+        else:
+            self.window.show_quick_panel(["No bookmarks found"], None, sublime.MONOSPACE_FONT)
 
-	def debug(self, title, obj):
-		if self.debugger:
-			print("-------- " + title + " ---------")
-			print(obj)
-			print("----- End of " + title + " -----")
+    def go_there(self, index):
+        if index < 0 or index >= len(self.bookmark_locations):
+            return
+
+        file_path, pos = self.bookmark_locations[index]
+
+        def on_loaded(view):
+            region = sublime.Region(pos, pos)
+            view.sel().clear()
+            view.sel().add(region)
+            view.show_at_center(region)
+            self.window.focus_view(view)
+
+        # Try using encoded location to force full tab open + jump
+        dummy_view = self.window.new_file()  # temp view to use rowcol safely
+        dummy_view.set_scratch(True)         # won't prompt to save
+        try:
+            row, col = dummy_view.rowcol(pos)
+        finally:
+            self.window.focus_view(dummy_view)
+            self.window.run_command("close_file")
+
+        encoded_location = f"{file_path}:{row + 1}:{col + 1}"
+        view = self.window.open_file(encoded_location, sublime.ENCODED_POSITION)
+        sublime.set_timeout_async(lambda: self.wait_for_load(view, pos, on_loaded), 100)
+
+    def wait_for_load(self, view, pos, callback, tries=10):
+        if not view or tries <= 0:
+            return
+        if view.is_loading():
+            sublime.set_timeout_async(lambda: self.wait_for_load(view, pos, callback, tries - 1), 100)
+        else:
+            callback(view)
+
 
 def plugin_loaded():
 	road_bookmarks_watcher.start()
