@@ -32,7 +32,7 @@ class RoadBookmarksPanelCommand(sublime_plugin.WindowCommand):
                 col = entry.get("col", 0)
 
                 # Safe fallback for line content preview
-                line_content = "(loading...)"
+                line_content = "(open file...)"
                 if view and not view.is_loading():
                     try:
                         line_content = view.substr(view.line(pos)).strip()

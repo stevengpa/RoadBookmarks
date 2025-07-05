@@ -21,8 +21,9 @@ class RoadBookmarksWatcher():
 			for view in window.views():
 				try:
 					if road_bookmarks_db.shared_db.has_bookmarks_change(view):
+						# print("View Changed", view.file_name())
 						road_bookmarks_db.shared_db.save(view)
 				except Exception as e:
 					print("Error checking bookmarks in view:", e)
 
-		sublime.set_timeout_async(self._start_bookmarks_watch, int(self.interval * 1000))
+		sublime.set_timeout(self._start_bookmarks_watch, int(self.interval * 1000))
