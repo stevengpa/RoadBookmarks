@@ -15,3 +15,12 @@ You can access the plugin by pression on Mac `cmd+p` or Win/Linux `ctrl+p`, then
   }
 ]
 ```
+
+### Key Bindings
+Add the follwing key binding to your configuration:
+
+```json
+[
+    { "keys": ["ctrl+shift+b", "a"], "command": "road_bookmarks_panel" }
+]
+```
