@@ -23,6 +23,7 @@ class RoadBookmarksDB():
 		if not self.running:
 			return
 
+		self.cleanup_closed_views()
 		bookmarks = self.load()
 		change = False
 
@@ -117,7 +118,6 @@ class RoadBookmarksDB():
 
 		return False
 
-	# Optional: call this in watcher loop to avoid memory leaks
 	def cleanup_closed_views(self):
 		open_buffer_ids = [v.buffer_id() for w in sublime.windows() for v in w.views()]
 		for bid in list(self._last_known_positions.keys()):
