@@ -1,6 +1,5 @@
 import sublime, sublime_plugin
-import os, re
-import threading
+import os
 import sqlite3
 
 class RoadBookmarksDB():
