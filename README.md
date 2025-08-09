@@ -21,6 +21,6 @@ Add the follwing key binding to your configuration:
 
 ```json
 [
-    { "keys": ["ctrl+shift+b", "a"], "command": "road_bookmarks_global_panel" }
+    { "keys": ["ctrl+shift+b", "a"], "command": "road_bookmarks_panel" }
 ]
 ```
